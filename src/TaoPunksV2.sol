@@ -4,12 +4,11 @@ pragma solidity ^0.8.24;
 import "erc721a/ERC721A.sol";
 import "erc721a/extensions/ERC721ABurnable.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title TaoPunksV2 — Community Takeover contract
 /// @notice Immutable metadata, 0% royalties, airdrop-only distribution
-contract TaoPunksV2 is ERC721A, ERC721ABurnable, Ownable2Step, Pausable, ReentrancyGuard {
+contract TaoPunksV2 is ERC721A, ERC721ABurnable, Ownable2Step, ReentrancyGuard {
 
     uint256 public constant MAX_SUPPLY = 3333;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
@@ -59,34 +58,12 @@ contract TaoPunksV2 is ERC721A, ERC721ABurnable, Ownable2Step, Pausable, Reentra
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  PAUSE (emergency only)
-    // ══════════════════════════════════════════════════════════════
-
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ══════════════════════════════════════════════════════════════
     //  SAFETY OVERRIDES
     // ══════════════════════════════════════════════════════════════
 
     /// @dev Disable renounceOwnership to prevent accidental lockout.
     function renounceOwnership() public pure override {
         revert("Disabled");
-    }
-
-    /// @dev Enforce pause on transfers.
-    function _beforeTokenTransfers(
-        address from,
-        address to,
-        uint256 startTokenId,
-        uint256 quantity
-    ) internal override whenNotPaused {
-        super._beforeTokenTransfers(from, to, startTokenId, quantity);
     }
 
     // ══════════════════════════════════════════════════════════════

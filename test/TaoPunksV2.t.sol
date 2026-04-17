@@ -318,81 +318,6 @@ contract TaoPunksV2Test is Test {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  PAUSE
-    // ═══════════════════════════════════════════════════════════
-
-    function test_pause_blocksTransfers() public {
-        address[] memory r = new address[](1);
-        r[0] = alice;
-        vm.prank(owner);
-        nft.airdropBatch(r);
-
-        vm.prank(owner);
-        nft.pause();
-
-        vm.prank(alice);
-        vm.expectRevert();
-        nft.transferFrom(alice, bob, 1);
-    }
-
-    function test_pause_blocksBurns() public {
-        address[] memory r = new address[](1);
-        r[0] = alice;
-        vm.prank(owner);
-        nft.airdropBatch(r);
-
-        vm.prank(owner);
-        nft.pause();
-
-        vm.prank(alice);
-        vm.expectRevert();
-        nft.burn(1);
-    }
-
-    function test_pause_blocksAirdrop() public {
-        vm.prank(owner);
-        nft.pause();
-
-        address[] memory r = new address[](1);
-        r[0] = alice;
-        vm.prank(owner);
-        vm.expectRevert();
-        nft.airdropBatch(r);
-    }
-
-    function test_unpause_resumesAll() public {
-        address[] memory r = new address[](2);
-        r[0] = alice; r[1] = bob;
-        vm.prank(owner);
-        nft.airdropBatch(r);
-
-        vm.prank(owner);
-        nft.pause();
-        vm.prank(owner);
-        nft.unpause();
-
-        // Transfer works
-        vm.prank(alice);
-        nft.transferFrom(alice, bob, 1);
-        assertEq(nft.ownerOf(1), bob);
-    }
-
-    function test_revert_pause_notOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        nft.pause();
-    }
-
-    function test_revert_unpause_notOwner() public {
-        vm.prank(owner);
-        nft.pause();
-
-        vm.prank(alice);
-        vm.expectRevert();
-        nft.unpause();
-    }
-
-    // ═══════════════════════════════════════════════════════════
     //  OWNERSHIP (Ownable2Step)
     // ═══════════════════════════════════════════════════════════
 
@@ -764,16 +689,7 @@ contract TaoPunksV2Test is Test {
         nft.acceptOwnership();
         assertEq(nft.owner(), alice);
 
-        // 9. New owner can pause (emergency)
-        vm.prank(alice);
-        nft.pause();
-        vm.prank(bob);
-        vm.expectRevert();
-        nft.transferFrom(bob, alice, 5);
-
-        // 10. New owner can unpause
-        vm.prank(alice);
-        nft.unpause();
+        // 9. New owner can still operate
         vm.prank(bob);
         nft.transferFrom(bob, alice, 5);
         assertEq(nft.ownerOf(5), alice);
