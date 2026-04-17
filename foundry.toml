@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.26"
+evm_version = "cancun"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "erc721a/=lib/ERC721A/contracts/",
+  "@openzeppelin/=lib/openzeppelin-contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+[rpc_endpoints]
+bittensor = "https://lite.chain.opentensor.ai"
