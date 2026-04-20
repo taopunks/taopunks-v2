@@ -173,4 +173,91 @@ node script/execute-airdrop.js <V2_CONTRACT_ADDRESS>
 
 ---
 
+## TAO Punks Agent Registry
+
+**ERC-8004 + ERC-8041 | Pay-Per-Call AI Agents | 100% Holder Revenue**
+
+The Agent Registry turns each TAO Punk into a queryable AI agent endpoint. Punk holders earn TAO every time someone queries their agent. No protocol fee — 100% of revenue goes to holders.
+
+### How It Works
+
+```
+1. Holder activates their punk as an agent (one-time, irreversible)
+2. Anyone queries the agent by paying TAO (0.0001 - 1 TAO per query)
+3. Relay fulfills the query off-chain, credits 100% to the holder
+4. Holder calls claim() to withdraw accumulated earnings
+```
+
+### Contract Architecture
+
+```
+TaoPunkAgentRegistry.sol (454 lines)
+  ├── IERC8041Collection  — Fixed-supply agent NFT standard
+  ├── AccessControl       — Role-based permissions (Admin, Governor, Fulfiller)
+  └── ReentrancyGuard     — Mutex on query() and claim()
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **100% to holders** | No protocol fee, no referrer split. Every wei of query revenue goes to the punk owner. |
+| **Pull-based claim()** | Fees accumulate in `pendingWithdrawals`. Holders withdraw on their own schedule. Eliminates DOS vectors. |
+| **Immutable economics** | Fee bounds (0.0001-1 TAO) and revenue model are Solidity `constant` — no admin can change them. |
+| **fulfill() has zero external calls** | Pure storage write. Cannot be griefed by malicious holder contracts. |
+| **Agent bound to punk** | Control follows `ownerOf()`. Sell your punk = sell your agent. No separate token. |
+
+### Revenue Model (IMMUTABLE)
+
+```solidity
+MIN_QUERY_FEE = 0.0001 ether   // Minimum per query
+MAX_QUERY_FEE = 1 ether         // Maximum per query
+
+// fulfill() credits 100% to holder
+// claim() withdraws accumulated balance
+// 0% protocol fee. 0% referrer. 100% holder.
+```
+
+### Security Audit
+
+**96 tests, 5 fuzz campaigns, 100% pass rate.**
+
+| Category | Tests |
+|---|---|
+| Activation + Management | 17 |
+| Query / Fulfill / Claim | 15 |
+| Refund / Expiry | 3 |
+| Governance | 7 |
+| ERC-8041 Compliance | 4 |
+| Hardened Security | 22 |
+| Claim Edge Cases | 10 |
+| Fuzz (1,281 runs) | 5 |
+| Gas Benchmarks | 4 |
+| End-to-End | 1 |
+| **TOTAL** | **96** |
+
+**Findings:** 2 HIGH (both RESOLVED), 1 LOW (acknowledged), 5 INFO (documented).
+
+Full audit report: [`TaoPunks_AgentRegistry_Security_Audit.pdf`](./audit/TaoPunks_AgentRegistry_Security_Audit.pdf)
+
+### Build & Test
+
+```bash
+cd contracts
+forge install
+forge build
+forge test --match-contract TaoPunkAgentRegistryTest -vv
+```
+
+### Contracts
+
+| Contract | Lines | Purpose |
+|---|---|---|
+| `src/TaoPunkAgentRegistry.sol` | 454 | ERC-8004 agent registry with pay-per-call |
+| `src/TaoPunksV2.sol` | 122 | Immutable ERC721A (CTO collection) |
+| `test/TaoPunkAgentRegistry.t.sol` | ~1500 | 96-test security suite |
+| `test/TaoPunksV2.t.sol` | 781 | 50-test V2 suite |
+
+---
+
 *Built by the community, for the community. No team allocation. No royalties. No kill switches. Just punks.*
