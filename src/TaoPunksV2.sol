@@ -20,6 +20,7 @@ contract TaoPunksV2 is ERC721A, ERC721ABurnable, Ownable2Step, ReentrancyGuard {
     bool public airdropFinalized;
 
     error AirdropAlreadyFinalized();
+    error AirdropNotFinalized();
     error ExceedsMaxSupply();
     error NotTokenOwner();
 
@@ -61,9 +62,11 @@ contract TaoPunksV2 is ERC721A, ERC721ABurnable, Ownable2Step, ReentrancyGuard {
     //  SAFETY OVERRIDES
     // ══════════════════════════════════════════════════════════════
 
-    /// @dev Disable renounceOwnership to prevent accidental lockout.
-    function renounceOwnership() public pure override {
-        revert("Disabled");
+    /// @dev Only allow renouncing ownership after airdrop is finalized.
+    ///      Prevents accidental lockout during airdrop phase.
+    function renounceOwnership() public override onlyOwner {
+        if (!airdropFinalized) revert AirdropNotFinalized();
+        super.renounceOwnership();
     }
 
     // ══════════════════════════════════════════════════════════════

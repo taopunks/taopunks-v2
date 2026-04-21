@@ -321,9 +321,26 @@ contract TaoPunksV2Test is Test {
     //  OWNERSHIP (Ownable2Step)
     // ═══════════════════════════════════════════════════════════
 
-    function test_renounceOwnership_reverts() public {
+    function test_renounceOwnership_revertsBeforeFinalize() public {
         vm.prank(owner);
-        vm.expectRevert("Disabled");
+        vm.expectRevert(TaoPunksV2.AirdropNotFinalized.selector);
+        nft.renounceOwnership();
+    }
+
+    function test_renounceOwnership_succeedsAfterFinalize() public {
+        address[] memory r = new address[](1);
+        r[0] = alice;
+        vm.startPrank(owner);
+        nft.airdropBatch(r);
+        nft.finalizeAirdrop();
+        nft.renounceOwnership();
+        vm.stopPrank();
+        assertEq(nft.owner(), address(0));
+    }
+
+    function test_renounceOwnership_nonOwnerReverts() public {
+        vm.prank(alice);
+        vm.expectRevert();
         nft.renounceOwnership();
     }
 
