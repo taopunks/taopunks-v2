@@ -619,6 +619,90 @@ contract TaoPunkAgentRegistryTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  OWNER-BYPASS (Free Queries for Punk Owners)
+    // ═══════════════════════════════════════════════════════════
+
+    function _activatePunk1() internal {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+    }
+
+    function test_ownerBypass_freeQuery() public {
+        _activatePunk1();
+        vm.prank(alice);
+        uint256 qId = registry.query{value: 0}(1, keccak256("hello"));
+        (uint256 punkId, address caller, uint128 fee,,,) = registry.queries(qId);
+        assertEq(punkId, 1);
+        assertEq(caller, alice);
+        assertEq(fee, 0);
+    }
+
+    function test_ownerBypass_emitsOwnerQueryEvent() public {
+        _activatePunk1();
+        vm.expectEmit(true, true, true, true);
+        emit TaoPunkAgentRegistry.OwnerQuery(0, 1, alice, keccak256("test"));
+        vm.prank(alice);
+        registry.query{value: 0}(1, keccak256("test"));
+    }
+
+    function test_ownerBypass_ownerCanStillPayIfWanted() public {
+        _activatePunk1();
+        vm.prank(alice);
+        uint256 qId = registry.query{value: 0.5 ether}(1, keccak256("paid"));
+        (,, uint128 fee,,,) = registry.queries(qId);
+        assertEq(fee, 0.5 ether);
+    }
+
+    function test_ownerBypass_nonOwnerCannotQueryFree() public {
+        _activatePunk1();
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(
+            TaoPunkAgentRegistry.InsufficientFee.selector, 0, 0.0001 ether
+        ));
+        registry.query{value: 0}(1, keccak256("freeloader"));
+    }
+
+    function test_ownerBypass_fulfillCreditsZeroForFreeQuery() public {
+        _activatePunk1();
+        vm.prank(alice);
+        uint256 qId = registry.query{value: 0}(1, keccak256("free"));
+
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+
+        assertEq(registry.pendingWithdrawals(alice), 0);
+    }
+
+    function test_ownerBypass_queryCountStillIncrements() public {
+        _activatePunk1();
+        vm.prank(alice);
+        uint256 qId = registry.query{value: 0}(1, keccak256("free"));
+
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+
+        assertEq(registry.getQueryCount(1), 1);
+    }
+
+    function test_ownerBypass_afterTransferNewOwnerQueriesFree() public {
+        _activatePunk1();
+        punks.transferFrom(alice, bob, 1);
+
+        // Bob (new owner) queries free
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0}(1, keccak256("new owner"));
+        (,, uint128 fee,,,) = registry.queries(qId);
+        assertEq(fee, 0);
+
+        // Alice (old owner) must pay
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(
+            TaoPunkAgentRegistry.InsufficientFee.selector, 0, 0.0001 ether
+        ));
+        registry.query{value: 0}(1, keccak256("old owner freebie"));
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  GOVERNANCE
     // ═══════════════════════════════════════════════════════════
 

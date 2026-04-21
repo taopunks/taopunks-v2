@@ -138,6 +138,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
 
     event QueryRefunded(uint256 indexed queryId);
     event Claimed(address indexed account, uint256 amount);
+    event OwnerQuery(uint256 indexed queryId, uint256 indexed punkId, address indexed owner, bytes32 inputHash);
 
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
     event ActivationOpened(uint256 startBlock);
@@ -256,6 +257,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     // ══════════════════════════════════════════════════════════════
 
     /// @notice Submit a query to a punk agent. Caller pays TAO, held in escrow.
+    ///         Punk owners can query their own agent for free (0 TAO).
     /// @param punkId The punk to query
     /// @param inputHash keccak256 hash of the input data (full data sent off-chain to relay)
     function query(uint256 punkId, bytes32 inputHash)
@@ -265,21 +267,29 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
         onlyActivePunk(punkId)
         returns (uint256 queryId)
     {
-        if (msg.value < MIN_QUERY_FEE) revert InsufficientFee(msg.value, MIN_QUERY_FEE);
-        if (msg.value > MAX_QUERY_FEE) revert ExcessiveFee(msg.value, MAX_QUERY_FEE);
+        bool isOwner = punks.ownerOf(punkId) == msg.sender;
+
+        if (!isOwner) {
+            if (msg.value < MIN_QUERY_FEE) revert InsufficientFee(msg.value, MIN_QUERY_FEE);
+            if (msg.value > MAX_QUERY_FEE) revert ExcessiveFee(msg.value, MAX_QUERY_FEE);
+        }
 
         queryId = nextQueryId++;
 
         queries[queryId] = Query({
             punkId: punkId,
             caller: msg.sender,
-            fee: uint128(msg.value),
+            fee: uint128(msg.value), // 0 for owner queries
             status: QueryStatus.Pending,
             createdAt: uint64(block.timestamp),
             inputHash: inputHash
         });
 
-        emit QueryRequested(queryId, punkId, msg.sender, uint128(msg.value), inputHash);
+        if (isOwner) {
+            emit OwnerQuery(queryId, punkId, msg.sender, inputHash);
+        } else {
+            emit QueryRequested(queryId, punkId, msg.sender, uint128(msg.value), inputHash);
+        }
     }
 
     /// @notice Fulfill a pending query with results. Credits 100% of fee to punk holder's claimable balance.
