@@ -1934,6 +1934,202 @@ contract TaoPunkAgentRegistryTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  DEACTIVATION (Full Reset & Re-Activation)
+    // ═══════════════════════════════════════════════════════════
+
+    function test_deactivateAgent() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+        assertTrue(registry.isAgentActive(1));
+        assertEq(registry.getCollectionSupply(), 1);
+
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        assertFalse(registry.isAgentActive(1));
+        assertEq(registry.getCollectionSupply(), 0);
+    }
+
+    function test_deactivateAgent_emitsEvent() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        vm.expectEmit(true, true, false, true);
+        emit TaoPunkAgentRegistry.AgentDeactivated(1, alice);
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+    }
+
+    function test_deactivateAgent_resetsAllFields() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        // Set some state
+        vm.prank(alice);
+        registry.setMinFee(1, 0.05 ether);
+        vm.prank(alice);
+        registry.pauseAgent(1);
+
+        // Fulfill a query to increment stats
+        vm.prank(alice);
+        registry.resumeAgent(1);
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.1 ether}(1, keccak256("test"));
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+
+        // Deactivate
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        // All fields reset
+        (bool active, bool paused, uint64 activatedAt, uint64 queryCount, uint64 lastQueryAt, uint128 minFee, string memory uri) = registry.getAgent(1);
+        assertFalse(active);
+        assertFalse(paused);
+        assertEq(activatedAt, 0);
+        assertEq(queryCount, 0);
+        assertEq(lastQueryAt, 0);
+        assertEq(minFee, 0);
+        assertEq(bytes(uri).length, 0);
+    }
+
+    function test_deactivateAgent_reactivateFresh() public {
+        // Activate, do some work, deactivate
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.1 ether}(1, keccak256("test"));
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+        assertEq(registry.getQueryCount(1), 1);
+
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+        assertEq(registry.getCollectionSupply(), 0);
+
+        // Re-activate with new URI — starts fresh
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI_2);
+
+        assertTrue(registry.isAgentActive(1));
+        assertEq(registry.getCollectionSupply(), 1);
+        assertEq(registry.getQueryCount(1), 0); // Stats reset
+
+        (,,,,,, string memory uri) = registry.getAgent(1);
+        assertEq(uri, AGENT_URI_2);
+    }
+
+    function test_revert_deactivate_notOwner() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.NotPunkOwner.selector, 1));
+        registry.deactivateAgent(1);
+    }
+
+    function test_revert_deactivate_notActive() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentNotActive.selector, 1));
+        registry.deactivateAgent(1);
+    }
+
+    function test_deactivate_queryReverts() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        // Queries now revert — agent not active
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentNotActive.selector, 1));
+        registry.query{value: 0.01 ether}(1, keccak256("test"));
+    }
+
+    function test_deactivate_pendingQueriesStillRefundable() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        // Submit a query
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.5 ether}(1, keccak256("test"));
+
+        // Deactivate while query is pending
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        // Pending query can still be refunded after expiry
+        vm.warp(block.timestamp + 2 hours);
+        uint256 bobBefore = bob.balance;
+        registry.refundExpiredQuery(qId);
+        assertEq(bob.balance, bobBefore + 0.5 ether);
+    }
+
+    function test_deactivate_pendingWithdrawalsPreserved() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 1 ether}(1, keccak256("test"));
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+
+        assertEq(registry.pendingWithdrawals(alice), 1 ether);
+
+        // Deactivate — earned TAO is NOT lost
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        // Alice can still claim her earned balance
+        assertEq(registry.pendingWithdrawals(alice), 1 ether);
+        uint256 aliceBefore = alice.balance;
+        vm.prank(alice);
+        registry.claim();
+        assertEq(alice.balance, aliceBefore + 1 ether);
+    }
+
+    function test_deactivate_newOwnerCanReactivateAfterTransfer() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+
+        // Alice transfers punk to Bob
+        punks.transferFrom(alice, bob, 1);
+
+        // Bob can re-activate fresh
+        vm.prank(bob);
+        registry.activateAgent(1, AGENT_URI_2);
+        assertTrue(registry.isAgentActive(1));
+        assertEq(registry.getController(1), bob);
+    }
+
+    function test_deactivate_erc8041SupplyTracking() public {
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI);
+        vm.prank(bob);
+        registry.activateAgent(4, AGENT_URI);
+        assertEq(registry.getCollectionSupply(), 2);
+
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+        assertEq(registry.getCollectionSupply(), 1);
+
+        // Re-activate bumps it back up
+        vm.prank(alice);
+        registry.activateAgent(1, AGENT_URI_2);
+        assertEq(registry.getCollectionSupply(), 2);
+
+        // Deactivate both
+        vm.prank(alice);
+        registry.deactivateAgent(1);
+        vm.prank(bob);
+        registry.deactivateAgent(4);
+        assertEq(registry.getCollectionSupply(), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  GAS BENCHMARKS
     // ═══════════════════════════════════════════════════════════
 

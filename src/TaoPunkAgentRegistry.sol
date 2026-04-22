@@ -125,6 +125,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     event AgentPaused(uint256 indexed punkId);
     event AgentResumed(uint256 indexed punkId);
     event AgentMinFeeUpdated(uint256 indexed punkId, uint128 oldFee, uint128 newFee);
+    event AgentDeactivated(uint256 indexed punkId, address indexed owner);
 
     event QueryRequested(
         uint256 indexed queryId,
@@ -238,6 +239,21 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     // ══════════════════════════════════════════════════════════════
     //  AGENT MANAGEMENT (owner of punk controls agent)
     // ══════════════════════════════════════════════════════════════
+
+    /// @notice Deactivate your agent. Resets all stats, URI, minFee, and paused state.
+    ///         The punk can be re-activated later via activateAgent() with a fresh start.
+    /// @param punkId The punk to deactivate
+    function deactivateAgent(uint256 punkId)
+        external
+        onlyPunkOwner(punkId)
+        onlyActivePunk(punkId)
+    {
+        delete _agents[punkId]; // Resets entire struct to defaults (active=false, all zeros)
+
+        unchecked { _currentSupply--; }
+
+        emit AgentDeactivated(punkId, msg.sender);
+    }
 
     /// @notice Update agent metadata URI (only punk owner)
     function updateAgentURI(uint256 punkId, string calldata newURI)
