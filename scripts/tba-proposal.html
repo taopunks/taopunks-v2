@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TAO Punks — ERC-6551 Token Bound Accounts Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --accent: #6c5ce7;
+    --accent2: #00cec9;
+    --text: #e0e0e8;
+    --muted: #888899;
+    --green: #00b894;
+    --red: #e17055;
+    --yellow: #fdcb6e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 11pt;
+  }
+
+  .page { page-break-after: always; padding: 0; }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ---- COVER ---- */
+  .cover {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(108,92,231,0.15) 0%, transparent 70%);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .cover h1 {
+    font-size: 42pt;
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(135deg, #6c5ce7, #00cec9);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .cover .subtitle {
+    font-size: 16pt;
+    color: var(--muted);
+    font-weight: 500;
+    margin-bottom: 40px;
+    position: relative;
+  }
+  .cover .badge {
+    display: inline-block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10pt;
+    color: var(--accent2);
+    position: relative;
+  }
+  .cover .meta {
+    margin-top: 60px;
+    font-size: 9pt;
+    color: var(--muted);
+    position: relative;
+  }
+
+  /* ---- CONTENT PAGES ---- */
+  .content { padding: 10px 0; }
+
+  h2 {
+    font-size: 18pt;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 28px 0 14px 0;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+  }
+  h2:first-child { margin-top: 0; }
+
+  h3 {
+    font-size: 13pt;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 20px 0 8px 0;
+  }
+
+  p { margin: 8px 0; }
+
+  ul, ol { margin: 8px 0 8px 20px; }
+  li { margin: 4px 0; }
+
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9pt;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  pre {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5pt;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 10px 0;
+    overflow-x: auto;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .highlight { color: var(--accent); }
+  .highlight2 { color: var(--accent2); }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .yellow { color: var(--yellow); }
+
+  /* Comparison table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 10pt;
+  }
+  th {
+    background: var(--surface);
+    color: var(--accent);
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+  }
+  td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+  }
+  tr:nth-child(even) td { background: rgba(18,18,26,0.5); }
+
+  /* Box callout */
+  .callout {
+    background: var(--surface);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 14px 0;
+  }
+  .callout.green-border { border-left-color: var(--green); }
+  .callout.yellow-border { border-left-color: var(--yellow); }
+
+  /* Flow diagram */
+  .flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+  }
+  .flow-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    font-size: 9pt;
+    font-weight: 500;
+    min-width: 100px;
+  }
+  .flow-box.accent { border-color: var(--accent); color: var(--accent); }
+  .flow-box.accent2 { border-color: var(--accent2); color: var(--accent2); }
+  .flow-box.green-box { border-color: var(--green); color: var(--green); }
+  .flow-arrow { font-size: 16pt; color: var(--muted); }
+
+  /* Stats grid */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 14px 0;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+  }
+  .stat-card .number {
+    font-size: 22pt;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .stat-card .label {
+    font-size: 9pt;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .footer {
+    text-align: center;
+    font-size: 8pt;
+    color: var(--muted);
+    margin-top: 30px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: COVER -->
+<div class="page cover">
+  <h1>TAO Punks</h1>
+  <div class="subtitle">ERC-6551 Token Bound Accounts</div>
+  <div class="badge">Community Proposal &mdash; Bittensor EVM (Chain 964)</div>
+  <div class="meta">
+    TAO Punks CTO &bull; April 2026<br>
+    3,333 Punks &bull; ERC-721A + ERC-8004 Agent Registry + ERC-6551 TBA
+  </div>
+</div>
+
+<!-- PAGE 2: WHAT & WHY -->
+<div class="page content">
+  <h2>What Are Token Bound Accounts?</h2>
+  <p>
+    <strong>ERC-6551</strong> gives every NFT its own smart contract wallet. Each TAO Punk gets a deterministic
+    Ethereum address that can hold TAO, receive payments, and execute transactions &mdash; controlled exclusively
+    by whoever owns the punk.
+  </p>
+
+  <div class="callout">
+    <strong>The punk IS the wallet.</strong> When you own a punk, you control its wallet. When you sell or transfer
+    the punk, the wallet (and everything inside it) transfers with it.
+  </div>
+
+  <h3>How It Works</h3>
+  <div class="flow">
+    <div class="flow-box">TaoPunksV2<br><small>ERC-721A</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent">ERC6551Registry<br><small>Deploys TBAs</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent2">TaoPunkAccount<br><small>Punk's Wallet</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box green-box">Holds TAO<br><small>Owner withdraws</small></div>
+  </div>
+
+  <p>
+    Each TBA is an <strong>ERC-1167 minimal proxy</strong> deployed via <code>CREATE2</code>, making its address
+    deterministic and predictable. You can send TAO to a punk's wallet address before it's even deployed &mdash;
+    the address is computed from the punk ID, chain ID, and NFT contract.
+  </p>
+
+  <h2>Why TBAs for TAO Punks?</h2>
+
+  <h3>Revenue Follows the NFT</h3>
+  <p>
+    When an AI agent earns fees through the Agent Registry (ERC-8004), the TAO goes directly into the punk's TBA.
+    If the punk changes hands, the new owner controls all accumulated earnings. This creates a genuine
+    <strong>revenue-bearing NFT</strong> &mdash; the punk's value includes its wallet balance.
+  </p>
+
+  <h3>No More Claiming</h3>
+  <p>
+    The old model required holders to call <code>claim()</code> to withdraw earned fees. With TBAs, fees land
+    in the punk's wallet automatically on fulfillment. The holder uses <code>execute()</code> to move funds
+    whenever they want.
+  </p>
+
+  <h3>Composable Identity</h3>
+  <p>
+    A punk's TBA can hold other tokens, interact with DeFi protocols, and serve as an on-chain identity.
+    The punk becomes more than a profile picture &mdash; it's an autonomous economic agent on Bittensor.
+  </p>
+</div>
+
+<!-- PAGE 3: BEFORE / AFTER -->
+<div class="page content">
+  <h2>Before vs. After</h2>
+
+  <table>
+    <tr>
+      <th style="width:30%">Aspect</th>
+      <th style="width:35%"><span class="red">Before (Pull Model)</span></th>
+      <th style="width:35%"><span class="green">After (TBA / Push Model)</span></th>
+    </tr>
+    <tr>
+      <td>Fee Collection</td>
+      <td>Accumulated in <code>pendingWithdrawals</code> mapping</td>
+      <td>Sent directly to punk's TBA on fulfill</td>
+    </tr>
+    <tr>
+      <td>Withdrawal</td>
+      <td>Holder calls <code>claim()</code></td>
+      <td>Holder calls TBA <code>execute()</code></td>
+    </tr>
+    <tr>
+      <td>Revenue on Transfer</td>
+      <td>Stays with old owner's address</td>
+      <td>Wallet transfers with the punk</td>
+    </tr>
+    <tr>
+      <td>Fund Location</td>
+      <td>Locked in registry contract</td>
+      <td>In each punk's own wallet</td>
+    </tr>
+    <tr>
+      <td>Escrow Risk</td>
+      <td>Registry holds all funds</td>
+      <td>Funds leave registry immediately</td>
+    </tr>
+    <tr>
+      <td>Composability</td>
+      <td>Punk is identity pointer only</td>
+      <td>Punk is identity + wallet + agent</td>
+    </tr>
+    <tr>
+      <td>Gas per Fulfill</td>
+      <td>~35K (storage write)</td>
+      <td>~51K (storage + TAO transfer)</td>
+    </tr>
+  </table>
+
+  <h2>Architecture</h2>
+
+  <pre>
+TaoPunksV2 (ERC-721A)          &mdash; 3,333 NFTs, immutable
+    |
+    |  ownerOf(punkId)
+    v
+TaoPunkAgentRegistry           &mdash; ERC-8004/8041 Agent Registry
+    |  _fulfill() computes TBA  &rarr;  sends TAO
+    v
+ERC6551Registry                &mdash; Deployed once, creates TBAs via CREATE2
+    |  account()               &mdash; Pure address computation (~200 gas)
+    v
+TaoPunkAccount                 &mdash; ERC-1167 proxy, one per punk
+    |  receive()               &mdash; Accepts TAO from fulfill
+    |  execute()               &mdash; Only punk owner can call
+    |  token()                 &mdash; Returns (chainId, contract, tokenId)
+    v
+Punk Owner                     &mdash; Controls TBA via ownerOf(punkId)
+  </pre>
+
+  <h3>Key Design Decisions</h3>
+  <ul>
+    <li><strong>Counterfactual addresses:</strong> TAO can be sent to a punk's TBA before it's deployed. The address is deterministic via CREATE2.</li>
+    <li><strong>CALL only:</strong> TBA restricts to operation type 0 (CALL). No DELEGATECALL or CREATE for security.</li>
+    <li><strong>No migration cost:</strong> The registry hasn't been deployed yet &mdash; clean integration, no state to preserve.</li>
+    <li><strong>Permissionless TBA creation:</strong> Anyone can call <code>createPunkTBA()</code>. It's idempotent.</li>
+    <li><strong>NonReentrant:</strong> <code>fulfill()</code> and <code>batchFulfill()</code> are protected since they now make external calls.</li>
+  </ul>
+</div>
+
+<!-- PAGE 4: FLOW & SECURITY -->
+<div class="page content">
+  <h2>Query-to-Payment Flow</h2>
+
+  <div class="flow">
+    <div class="flow-box">User</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent">query(punkId)<br><small>sends TAO fee</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box">Registry<br><small>holds in escrow</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent">fulfill(queryId)<br><small>by fulfiller</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent2">Punk's TBA<br><small>receives TAO</small></div>
+  </div>
+
+  <p>
+    On <code>_fulfill()</code>, the registry computes the punk's TBA address via
+    <code>tbaRegistry.account()</code> (a view call, ~200 gas) and sends the fee directly.
+    The TAO leaves the registry immediately &mdash; no accumulation, no claiming.
+  </p>
+
+  <h3>Withdrawal by Punk Owner</h3>
+  <div class="flow">
+    <div class="flow-box green-box">Punk Owner</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box accent2">TBA.execute()<br><small>to: owner, value: X</small></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box green-box">TAO received</div>
+  </div>
+
+  <h2>Security Model</h2>
+
+  <div class="callout green-border">
+    <strong>Only the punk owner controls the TBA.</strong> The <code>execute()</code> function checks
+    <code>TaoPunksV2.ownerOf(tokenId)</code> dynamically &mdash; ownership is always current, never cached.
+  </div>
+
+  <h3>Access Control</h3>
+  <ul>
+    <li><strong>execute()</strong> &mdash; Reverts with <code>NotAuthorized</code> if <code>msg.sender != ownerOf(punkId)</code></li>
+    <li><strong>Operation restriction</strong> &mdash; Only <code>CALL</code> (operation 0). No DELEGATECALL or CREATE.</li>
+    <li><strong>Dynamic ownership</strong> &mdash; <code>isValidSigner()</code> always reads the current NFT owner</li>
+    <li><strong>Isolation</strong> &mdash; Each punk's TBA is completely independent. Punk 1's owner cannot access Punk 2's TBA.</li>
+  </ul>
+
+  <h3>Reentrancy Protection</h3>
+  <p>
+    Since <code>_fulfill()</code> now makes an external <code>.call{value}("")</code> to the TBA,
+    both <code>fulfill()</code> and <code>batchFulfill()</code> are protected with OpenZeppelin's
+    <code>nonReentrant</code> modifier.
+  </p>
+
+  <h3>Escrow Invariant</h3>
+  <table>
+    <tr>
+      <th>Model</th>
+      <th>Invariant</th>
+    </tr>
+    <tr>
+      <td><span class="red">Old (Pull)</span></td>
+      <td><code>balance >= sum(pendingWithdrawals) + sum(pending_fees)</code></td>
+    </tr>
+    <tr>
+      <td><span class="green">New (TBA)</span></td>
+      <td><code>balance >= sum(pending_fees)</code></td>
+    </tr>
+  </table>
+  <p>
+    TAO leaves the registry on fulfill, so the contract only needs to hold enough for pending (unfulfilled) query fees.
+    This dramatically reduces escrow risk.
+  </p>
+</div>
+
+<!-- PAGE 5: CONTRACTS & TESTS -->
+<div class="page content">
+  <h2>Contract Summary</h2>
+
+  <table>
+    <tr>
+      <th>Contract</th>
+      <th>Purpose</th>
+      <th>Status</th>
+    </tr>
+    <tr>
+      <td><code>TaoPunksV2.sol</code></td>
+      <td>ERC-721A NFT collection (3,333 punks)</td>
+      <td><span class="green">Unchanged</span></td>
+    </tr>
+    <tr>
+      <td><code>ERC6551Registry.sol</code></td>
+      <td>Deploys TBAs via CREATE2, computes deterministic addresses</td>
+      <td><span class="highlight">New</span></td>
+    </tr>
+    <tr>
+      <td><code>TaoPunkAccount.sol</code></td>
+      <td>TBA implementation (receive, execute, token, isValidSigner)</td>
+      <td><span class="highlight">New</span></td>
+    </tr>
+    <tr>
+      <td><code>TaoPunkAgentRegistry.sol</code></td>
+      <td>ERC-8004/8041 Agent Registry with TBA integration</td>
+      <td><span class="yellow">Modified</span></td>
+    </tr>
+    <tr>
+      <td><code>IERC6551Registry.sol</code></td>
+      <td>Standard ERC-6551 registry interface</td>
+      <td><span class="highlight">New</span></td>
+    </tr>
+    <tr>
+      <td><code>IERC6551Account.sol</code></td>
+      <td>Standard ERC-6551 account interface</td>
+      <td><span class="highlight">New</span></td>
+    </tr>
+    <tr>
+      <td><code>IERC6551Executable.sol</code></td>
+      <td>Standard ERC-6551 executable interface</td>
+      <td><span class="highlight">New</span></td>
+    </tr>
+  </table>
+
+  <h2>Test Results</h2>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="number">182</div>
+      <div class="label">Tests Passing</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">0</div>
+      <div class="label">Failures</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">3</div>
+      <div class="label">Test Suites</div>
+    </div>
+  </div>
+
+  <table>
+    <tr>
+      <th>Test Suite</th>
+      <th>Passed</th>
+      <th>Failed</th>
+      <th>Skipped</th>
+    </tr>
+    <tr>
+      <td>TaoPunkAgentRegistryTest</td>
+      <td><span class="green">136</span></td>
+      <td>0</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <td>TaoPunksV2Test</td>
+      <td><span class="green">46</span></td>
+      <td>0</td>
+      <td>0</td>
+    </tr>
+  </table>
+
+  <h3>TBA-Specific Test Coverage</h3>
+  <ul>
+    <li>TBA address determinism (consistent across multiple calls)</li>
+    <li>TBA receives TAO on fulfill (balance verified)</li>
+    <li>TBA withdrawal via <code>execute()</code> (punk owner sends TAO to self)</li>
+    <li>TBA ownership follows punk transfer (new owner controls TBA)</li>
+    <li>Counterfactual receiving (TAO sent before TBA deployment)</li>
+    <li>Batch fulfill sends to multiple TBAs correctly</li>
+    <li>TBA isolation (punk 1 owner cannot access punk 2's TBA)</li>
+    <li><code>TaoPunkAccount.execute()</code> &mdash; only owner, only CALL</li>
+    <li><code>TaoPunkAccount.token()</code> &mdash; returns correct chain/contract/id</li>
+    <li><code>TaoPunkAccount.isValidSigner()</code> &mdash; correct magic value</li>
+    <li><code>TaoPunkAccount.supportsInterface()</code> &mdash; ERC-165 compliance</li>
+    <li><code>TaoPunkAccount.state()</code> &mdash; monotonic increment on execute</li>
+    <li>Escrow accounting invariant (new model)</li>
+    <li>Reentrancy protection on fulfill</li>
+    <li>Revenue follows current owner (transfer + verify)</li>
+    <li>Fuzz tests: escrow invariant, fee percentages, expiry boundaries</li>
+  </ul>
+</div>
+
+<!-- PAGE 6: WHAT TRANSFERS -->
+<div class="page content">
+  <h2>What Transfers With Your Punk</h2>
+
+  <div class="callout green-border">
+    When a TAO Punk changes hands, the new owner gets <strong>everything</strong>:
+  </div>
+
+  <table>
+    <tr>
+      <th>Asset</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>The NFT</strong></td>
+      <td>ERC-721A token (TaoPunksV2)</td>
+    </tr>
+    <tr>
+      <td><strong>The Wallet (TBA)</strong></td>
+      <td>Smart contract wallet with all TAO inside</td>
+    </tr>
+    <tr>
+      <td><strong>Agent Identity</strong></td>
+      <td>ERC-8004 agent registration, metadata, query history</td>
+    </tr>
+    <tr>
+      <td><strong>Future Revenue</strong></td>
+      <td>All subsequent query fees go to the punk's TBA</td>
+    </tr>
+    <tr>
+      <td><strong>Agent Control</strong></td>
+      <td>Ability to activate, pause, set fees, update metadata</td>
+    </tr>
+  </table>
+
+  <p>
+    This makes TAO Punks <strong>revenue-bearing assets</strong>. A punk with an active AI agent and
+    accumulated earnings is worth more than a freshly minted one. The market can price in:
+  </p>
+  <ul>
+    <li>Current TBA balance (liquid TAO)</li>
+    <li>Agent query volume and revenue history</li>
+    <li>Agent reputation and metadata</li>
+    <li>Future earning potential</li>
+  </ul>
+
+  <h2>Standards Compliance</h2>
+
+  <table>
+    <tr>
+      <th>Standard</th>
+      <th>Description</th>
+      <th>Implementation</th>
+    </tr>
+    <tr>
+      <td><strong>ERC-721A</strong></td>
+      <td>Gas-optimized NFT</td>
+      <td>TaoPunksV2 (untouched)</td>
+    </tr>
+    <tr>
+      <td><strong>ERC-6551</strong></td>
+      <td>Token Bound Accounts</td>
+      <td>ERC6551Registry + TaoPunkAccount</td>
+    </tr>
+    <tr>
+      <td><strong>ERC-1167</strong></td>
+      <td>Minimal Proxy</td>
+      <td>Used by ERC6551Registry for TBA deployment</td>
+    </tr>
+    <tr>
+      <td><strong>ERC-165</strong></td>
+      <td>Interface Detection</td>
+      <td>TaoPunkAccount.supportsInterface()</td>
+    </tr>
+    <tr>
+      <td><strong>ERC-8004</strong></td>
+      <td>Trustless Agents</td>
+      <td>TaoPunkAgentRegistry</td>
+    </tr>
+    <tr>
+      <td><strong>ERC-8041</strong></td>
+      <td>Fixed-Supply Agent Collections</td>
+      <td>TaoPunkAgentRegistry</td>
+    </tr>
+  </table>
+
+  <h2>Deployment Plan</h2>
+  <ol>
+    <li>Deploy <code>TaoPunkAccount</code> (implementation contract, deployed once)</li>
+    <li>Deploy <code>ERC6551Registry</code> (deployed once, creates all TBAs)</li>
+    <li>Deploy <code>TaoPunkAgentRegistry</code> with TBA registry + implementation addresses</li>
+    <li>TBAs are created on-demand via <code>createPunkTBA()</code> (permissionless, idempotent)</li>
+    <li>Alternatively, TBAs can receive TAO at their deterministic addresses before creation</li>
+  </ol>
+
+  <div class="callout yellow-border">
+    <strong>No migration needed.</strong> The Agent Registry has not been deployed to mainnet yet.
+    This is a clean integration with zero existing state to preserve.
+  </div>
+
+  <div class="footer">
+    TAO Punks CTO &bull; Bittensor EVM (Chain 964) &bull; April 2026<br>
+    182 tests passing &bull; ERC-6551 + ERC-8004 + ERC-8041
+  </div>
+</div>
+
+</body>
+</html>

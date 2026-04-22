@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "./interfaces/IERC6551Registry.sol";
 
 /// @title IERC8041Collection — Fixed-Supply Agent NFT Collections
 /// @notice Minimal interface per EIP-8041 (Draft)
@@ -23,7 +24,8 @@ interface IERC721Minimal {
 /// @title TaoPunkAgentRegistry
 /// @notice Binds ERC-8004 agent identities to TAO Punks V2 NFTs using ERC-8041 fixed-supply logic.
 ///         Each punk can activate exactly one agent. Agent control follows punk ownership automatically.
-///         First ERC-8004 + ERC-8041 deployment on Bittensor EVM (Chain 964).
+///         Revenue goes directly to each punk's ERC-6551 Token Bound Account — the punk IS the wallet.
+///         First ERC-8004 + ERC-8041 + ERC-6551 deployment on Bittensor EVM (Chain 964).
 /// @dev    The punk contract (TaoPunksV2) is immutable and untouched. This contract reads ownerOf()
 ///         to derive agent control. No separate agent NFT is created — the punk IS the identity.
 contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGuard {
@@ -46,6 +48,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     uint256 public constant MIN_QUERY_FEE = 0.0001 ether; // 0.0001 TAO floor
     uint256 public constant MAX_QUERY_FEE = 1 ether;      // 1 TAO ceiling
     uint256 public constant MAX_BATCH_SIZE = 50;
+    bytes32 public constant TBA_SALT = bytes32(0);         // One TBA per punk
 
     // ══════════════════════════════════════════════════════════════
     //  IMMUTABLES
@@ -53,6 +56,12 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
 
     /// @notice The TaoPunksV2 ERC-721 contract
     IERC721Minimal public immutable punks;
+
+    /// @notice ERC-6551 registry for Token Bound Account address computation
+    IERC6551Registry public immutable tbaRegistry;
+
+    /// @notice TaoPunkAccount implementation contract
+    address public immutable tbaImplementation;
 
     // ══════════════════════════════════════════════════════════════
     //  AGENT STORAGE
@@ -95,9 +104,6 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
         bytes32 inputHash;      // keccak256 of input data (stored off-chain)
         bytes32 resultHash;     // keccak256 of result data (set on fulfill)
     }
-
-    /// @notice Claimable balances — holders call claim() to withdraw earned TAO
-    mapping(address => uint256) public pendingWithdrawals;
 
     /// @notice queryId → Query
     mapping(uint256 => Query) public queries;
@@ -142,7 +148,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     );
 
     event QueryRefunded(uint256 indexed queryId);
-    event Claimed(address indexed account, uint256 amount);
+    event FeeTransferredToTBA(uint256 indexed queryId, uint256 indexed punkId, address indexed tba, uint256 amount);
     event OwnerQuery(uint256 indexed queryId, uint256 indexed punkId, address indexed owner, bytes32 inputHash);
 
     event ActivationOpened(uint256 startBlock);
@@ -170,8 +176,8 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     error InvalidBatchSize();
     error BatchLengthMismatch();
     error TransferFailed(address to, uint256 amount);
+    error TBATransferFailed(uint256 punkId, address tba, uint256 amount);
     error QueryDoesNotExist(uint256 queryId);
-    error NothingToClaim();
     error ZeroAddress();
 
     // ══════════════════════════════════════════════════════════════
@@ -180,12 +186,20 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
 
     /// @param _punks TaoPunksV2 contract address
     /// @param _admin Initial admin (receives DEFAULT_ADMIN_ROLE)
-    constructor(address _punks, address _admin) {
-        if (_punks == address(0) || _admin == address(0)) {
-            revert ZeroAddress();
-        }
+    /// @param _tbaRegistry ERC-6551 registry contract address
+    /// @param _tbaImplementation TaoPunkAccount implementation address
+    constructor(
+        address _punks,
+        address _admin,
+        address _tbaRegistry,
+        address _tbaImplementation
+    ) {
+        if (_punks == address(0) || _admin == address(0)) revert ZeroAddress();
+        if (_tbaRegistry == address(0) || _tbaImplementation == address(0)) revert ZeroAddress();
 
         punks = IERC721Minimal(_punks);
+        tbaRegistry = IERC6551Registry(_tbaRegistry);
+        tbaImplementation = _tbaImplementation;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(GOVERNOR_ROLE, _admin);
@@ -242,6 +256,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
 
     /// @notice Deactivate your agent. Resets all stats, URI, minFee, and paused state.
     ///         The punk can be re-activated later via activateAgent() with a fresh start.
+    ///         TAO already in the punk's TBA is unaffected.
     /// @param punkId The punk to deactivate
     function deactivateAgent(uint256 punkId)
         external
@@ -360,12 +375,13 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
         }
     }
 
-    /// @notice Fulfill a pending query with results. Credits 100% of fee to punk holder's claimable balance.
+    /// @notice Fulfill a pending query. TAO goes directly to the punk's Token Bound Account.
     /// @param queryId The query to fulfill
     /// @param resultHash keccak256 hash of the result data (full result delivered off-chain)
     function fulfill(uint256 queryId, bytes32 resultHash)
         external
         onlyRole(FULFILLER_ROLE)
+        nonReentrant
     {
         _fulfill(queryId, resultHash);
     }
@@ -376,6 +392,7 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     function batchFulfill(uint256[] calldata queryIds, bytes32[] calldata resultHashes)
         external
         onlyRole(FULFILLER_ROLE)
+        nonReentrant
     {
         uint256 len = queryIds.length;
         if (len == 0 || len > MAX_BATCH_SIZE) revert InvalidBatchSize();
@@ -385,17 +402,6 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
             _fulfill(queryIds[i], resultHashes[i]);
             unchecked { ++i; }
         }
-    }
-
-    /// @notice Claim all earned TAO. Holders call this to withdraw their accumulated fees.
-    function claim() external nonReentrant {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        if (amount == 0) revert NothingToClaim();
-
-        pendingWithdrawals[msg.sender] = 0;
-        _safeTransfer(msg.sender, amount);
-
-        emit Claimed(msg.sender, amount);
     }
 
     /// @notice Refund an expired query to the caller
@@ -410,6 +416,26 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
         _safeTransfer(q.caller, q.fee);
 
         emit QueryRefunded(queryId);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  TOKEN BOUND ACCOUNTS (ERC-6551)
+    // ══════════════════════════════════════════════════════════════
+
+    /// @notice Compute the deterministic TBA address for a punk.
+    ///         Address is valid whether or not the TBA has been deployed.
+    function getPunkTBA(uint256 punkId) external view returns (address) {
+        return tbaRegistry.account(
+            tbaImplementation, TBA_SALT, block.chainid, address(punks), punkId
+        );
+    }
+
+    /// @notice Deploy the TBA for a punk (permissionless, idempotent).
+    ///         Returns the TBA address (same whether newly deployed or already exists).
+    function createPunkTBA(uint256 punkId) external returns (address) {
+        return tbaRegistry.createAccount(
+            tbaImplementation, TBA_SALT, block.chainid, address(punks), punkId
+        );
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -518,7 +544,8 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
     //  INTERNAL
     // ══════════════════════════════════════════════════════════════
 
-    /// @dev Internal fulfill logic shared by fulfill() and batchFulfill()
+    /// @dev Internal fulfill logic shared by fulfill() and batchFulfill().
+    ///      Sends TAO directly to the punk's Token Bound Account (push-based).
     function _fulfill(uint256 queryId, bytes32 resultHash) internal {
         Query storage q = queries[queryId];
         if (q.caller == address(0)) revert QueryDoesNotExist(queryId);
@@ -532,9 +559,15 @@ contract TaoPunkAgentRegistry is IERC8041Collection, AccessControl, ReentrancyGu
         unchecked { agent.queryCount++; }
         agent.lastQueryAt = uint64(block.timestamp);
 
-        // 100% to current punk holder — pull-based (no external call here)
-        address holder = punks.ownerOf(q.punkId);
-        pendingWithdrawals[holder] += q.fee;
+        // 100% to punk's TBA — push-based (TAO leaves registry immediately)
+        if (q.fee > 0) {
+            address tba = tbaRegistry.account(
+                tbaImplementation, TBA_SALT, block.chainid, address(punks), q.punkId
+            );
+            (bool ok, ) = tba.call{value: q.fee}("");
+            if (!ok) revert TBATransferFailed(q.punkId, tba, q.fee);
+            emit FeeTransferredToTBA(queryId, q.punkId, tba, q.fee);
+        }
 
         emit QueryFulfilled(queryId, q.punkId, resultHash);
     }
