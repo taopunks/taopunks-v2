@@ -36,7 +36,6 @@ contract TaoPunkAgentRegistryTest is Test {
     MockPunks public punks;
 
     address public admin = address(0xA);
-    address public treasury = address(0xB);
     address public alice = address(0xC);
     address public bob = address(0xD);
     address public fulfiller = address(0xE);
@@ -46,7 +45,7 @@ contract TaoPunkAgentRegistryTest is Test {
 
     function setUp() public {
         punks = new MockPunks();
-        registry = new TaoPunkAgentRegistry(address(punks), treasury, admin);
+        registry = new TaoPunkAgentRegistry(address(punks), admin);
 
         // Mint some punks
         punks.mint(alice, 1);
@@ -74,23 +73,20 @@ contract TaoPunkAgentRegistryTest is Test {
 
     function test_constructor() public view {
         assertEq(address(registry.punks()), address(punks));
-        assertEq(registry.treasury(), treasury);
         assertTrue(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(registry.hasRole(registry.GOVERNOR_ROLE(), admin));
         assertEq(registry.getMaxSupply(), 3333);
         assertEq(registry.getCollectionSupply(), 0);
         assertTrue(registry.activationOpen());
+        assertEq(registry.nextQueryId(), 1);
     }
 
     function test_constructor_revert_zeroAddress() public {
-        vm.expectRevert(TaoPunkAgentRegistry.InvalidTreasury.selector);
-        new TaoPunkAgentRegistry(address(0), treasury, admin);
+        vm.expectRevert(TaoPunkAgentRegistry.ZeroAddress.selector);
+        new TaoPunkAgentRegistry(address(0), admin);
 
-        vm.expectRevert(TaoPunkAgentRegistry.InvalidTreasury.selector);
-        new TaoPunkAgentRegistry(address(punks), address(0), admin);
-
-        vm.expectRevert(TaoPunkAgentRegistry.InvalidTreasury.selector);
-        new TaoPunkAgentRegistry(address(punks), treasury, address(0));
+        vm.expectRevert(TaoPunkAgentRegistry.ZeroAddress.selector);
+        new TaoPunkAgentRegistry(address(punks), address(0));
     }
 
     function test_supportsInterface_ERC8041() public view {
@@ -105,15 +101,18 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.prank(alice);
         registry.activateAgent(1, AGENT_URI);
 
-        (bool active, uint64 activatedAt, uint64 queryCount, uint64 lastQueryAt, string memory uri) = registry.getAgent(1);
+        (bool active, bool paused, uint64 activatedAt, uint64 queryCount, uint64 lastQueryAt, uint128 minFee, string memory uri) = registry.getAgent(1);
         assertTrue(active);
+        assertFalse(paused);
         assertGt(activatedAt, 0);
         assertEq(queryCount, 0);
         assertEq(lastQueryAt, 0);
+        assertEq(minFee, 0);
         assertEq(uri, AGENT_URI);
 
         assertEq(registry.getCollectionSupply(), 1);
         assertTrue(registry.isAgentActive(1));
+        assertFalse(registry.isAgentPaused(1));
     }
 
     function test_activateAgent_emitsEvents() public {
@@ -205,7 +204,7 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.prank(alice);
         registry.updateAgentURI(1, AGENT_URI_2);
 
-        (, , , , string memory uri) = registry.getAgent(1);
+        (, , , , , , string memory uri) = registry.getAgent(1);
         assertEq(uri, AGENT_URI_2);
     }
 
@@ -313,12 +312,13 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.prank(bob);
         uint256 qId = registry.query{value: 0.01 ether}(1, keccak256("hello"));
 
-        (uint256 punkId, address caller, uint128 fee, TaoPunkAgentRegistry.QueryStatus status, , bytes32 inputHash) = registry.queries(qId);
+        (uint256 punkId, address caller, uint128 fee, TaoPunkAgentRegistry.QueryStatus status, , bytes32 inputHash, bytes32 resultHash) = registry.queries(qId);
         assertEq(punkId, 1);
         assertEq(caller, bob);
         assertEq(fee, 0.01 ether);
         assertTrue(status == TaoPunkAgentRegistry.QueryStatus.Pending);
         assertEq(inputHash, keccak256("hello"));
+        assertEq(resultHash, bytes32(0));
     }
 
     function test_query_emitsEvent() public {
@@ -327,7 +327,7 @@ contract TaoPunkAgentRegistryTest is Test {
 
         vm.prank(bob);
         vm.expectEmit(true, true, true, true);
-        emit TaoPunkAgentRegistry.QueryRequested(0, 1, bob, 0.01 ether, keccak256("hello"));
+        emit TaoPunkAgentRegistry.QueryRequested(1, 1, bob, 0.01 ether, keccak256("hello"));
         registry.query{value: 0.01 ether}(1, keccak256("hello"));
     }
 
@@ -343,8 +343,6 @@ contract TaoPunkAgentRegistryTest is Test {
 
         // 100% credited to holder's pendingWithdrawals
         assertEq(registry.pendingWithdrawals(alice), 1 ether);
-        // Treasury gets nothing
-        assertEq(registry.pendingWithdrawals(treasury), 0);
     }
 
     function test_fulfill_updatesAgentStats() public {
@@ -358,7 +356,7 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.fulfill(qId, keccak256("result"));
 
         assertEq(registry.getQueryCount(1), 1);
-        (, , , uint64 lastQueryAt, ) = registry.getAgent(1);
+        (, , , , uint64 lastQueryAt, , ) = registry.getAgent(1);
         assertGt(lastQueryAt, 0);
     }
 
@@ -375,7 +373,7 @@ contract TaoPunkAgentRegistryTest is Test {
         }
 
         assertEq(registry.getQueryCount(1), 5);
-        // 5 × 0.01 = 0.05 ether credited
+        // 5 x 0.01 = 0.05 ether credited
         assertEq(registry.pendingWithdrawals(alice), 0.05 ether);
     }
 
@@ -587,7 +585,7 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.refundExpiredQuery(qId);
         assertEq(bob.balance, bobBefore + 0.5 ether);
 
-        (, , , TaoPunkAgentRegistry.QueryStatus status, , ) = registry.queries(qId);
+        (, , , TaoPunkAgentRegistry.QueryStatus status, , , ) = registry.queries(qId);
         assertTrue(status == TaoPunkAgentRegistry.QueryStatus.Expired);
     }
 
@@ -631,7 +629,7 @@ contract TaoPunkAgentRegistryTest is Test {
         _activatePunk1();
         vm.prank(alice);
         uint256 qId = registry.query{value: 0}(1, keccak256("hello"));
-        (uint256 punkId, address caller, uint128 fee,,,) = registry.queries(qId);
+        (uint256 punkId, address caller, uint128 fee, , , , ) = registry.queries(qId);
         assertEq(punkId, 1);
         assertEq(caller, alice);
         assertEq(fee, 0);
@@ -640,7 +638,7 @@ contract TaoPunkAgentRegistryTest is Test {
     function test_ownerBypass_emitsOwnerQueryEvent() public {
         _activatePunk1();
         vm.expectEmit(true, true, true, true);
-        emit TaoPunkAgentRegistry.OwnerQuery(0, 1, alice, keccak256("test"));
+        emit TaoPunkAgentRegistry.OwnerQuery(1, 1, alice, keccak256("test"));
         vm.prank(alice);
         registry.query{value: 0}(1, keccak256("test"));
     }
@@ -649,7 +647,7 @@ contract TaoPunkAgentRegistryTest is Test {
         _activatePunk1();
         vm.prank(alice);
         uint256 qId = registry.query{value: 0.5 ether}(1, keccak256("paid"));
-        (,, uint128 fee,,,) = registry.queries(qId);
+        (, , uint128 fee, , , , ) = registry.queries(qId);
         assertEq(fee, 0.5 ether);
     }
 
@@ -691,7 +689,7 @@ contract TaoPunkAgentRegistryTest is Test {
         // Bob (new owner) queries free
         vm.prank(bob);
         uint256 qId = registry.query{value: 0}(1, keccak256("new owner"));
-        (,, uint128 fee,,,) = registry.queries(qId);
+        (, , uint128 fee, , , , ) = registry.queries(qId);
         assertEq(fee, 0);
 
         // Alice (old owner) must pay
@@ -705,24 +703,6 @@ contract TaoPunkAgentRegistryTest is Test {
     // ═══════════════════════════════════════════════════════════
     //  GOVERNANCE
     // ═══════════════════════════════════════════════════════════
-
-    function test_setTreasury() public {
-        vm.prank(admin);
-        registry.setTreasury(alice);
-        assertEq(registry.treasury(), alice);
-    }
-
-    function test_revert_setTreasury_zero() public {
-        vm.prank(admin);
-        vm.expectRevert(TaoPunkAgentRegistry.InvalidTreasury.selector);
-        registry.setTreasury(address(0));
-    }
-
-    function test_revert_setTreasury_notGovernor() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        registry.setTreasury(alice);
-    }
 
     function test_setQueryExpiry() public {
         vm.prank(admin);
@@ -792,6 +772,380 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.expectEmit(false, false, false, true);
         emit IERC8041Collection.CollectionUpdated(3333, block.number + 100, true);
         registry.openActivation(block.number + 100);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  PAUSE / RESUME
+    // ═══════════════════════════════════════════════════════════
+
+    function test_pauseAgent() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        vm.expectEmit(true, false, false, true);
+        emit TaoPunkAgentRegistry.AgentPaused(1);
+        registry.pauseAgent(1);
+
+        assertTrue(registry.isAgentPaused(1));
+        (bool active, bool paused, , , , , ) = registry.getAgent(1);
+        assertTrue(active);
+        assertTrue(paused);
+    }
+
+    function test_resumeAgent() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.pauseAgent(1);
+        assertTrue(registry.isAgentPaused(1));
+
+        vm.prank(alice);
+        vm.expectEmit(true, false, false, true);
+        emit TaoPunkAgentRegistry.AgentResumed(1);
+        registry.resumeAgent(1);
+
+        assertFalse(registry.isAgentPaused(1));
+    }
+
+    function test_revert_query_whenPaused() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.pauseAgent(1);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentIsPaused.selector, 1));
+        registry.query{value: 0.01 ether}(1, keccak256("blocked"));
+    }
+
+    function test_revert_pauseAgent_notOwner() public {
+        _activatePunk1();
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.NotPunkOwner.selector, 1));
+        registry.pauseAgent(1);
+    }
+
+    function test_revert_resumeAgent_notOwner() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.pauseAgent(1);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.NotPunkOwner.selector, 1));
+        registry.resumeAgent(1);
+    }
+
+    function test_revert_pauseAgent_alreadyPaused() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.pauseAgent(1);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentIsPaused.selector, 1));
+        registry.pauseAgent(1);
+    }
+
+    function test_revert_resumeAgent_notPaused() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentNotPaused.selector, 1));
+        registry.resumeAgent(1);
+    }
+
+    function test_pause_doesNotAffectExistingPendingQueries() public {
+        _activatePunk1();
+
+        // Submit a query while agent is active
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.5 ether}(1, keccak256("before pause"));
+
+        // Pause the agent
+        vm.prank(alice);
+        registry.pauseAgent(1);
+
+        // Existing pending query can still be fulfilled
+        vm.prank(fulfiller);
+        registry.fulfill(qId, keccak256("result"));
+
+        assertEq(registry.pendingWithdrawals(alice), 0.5 ether);
+        assertEq(registry.getQueryCount(1), 1);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  HOLDER-SET PRICING (setMinFee)
+    // ═══════════════════════════════════════════════════════════
+
+    function test_setMinFee() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        vm.expectEmit(true, false, false, true);
+        emit TaoPunkAgentRegistry.AgentMinFeeUpdated(1, 0, 0.05 ether);
+        registry.setMinFee(1, 0.05 ether);
+
+        (, , , , , uint128 minFee, ) = registry.getAgent(1);
+        assertEq(minFee, 0.05 ether);
+        assertEq(registry.getEffectiveMinFee(1), 0.05 ether);
+    }
+
+    function test_setMinFee_effectiveMinFeeUsedInQuery() public {
+        _activatePunk1();
+
+        // Set holder minFee above global
+        vm.prank(alice);
+        registry.setMinFee(1, 0.05 ether);
+
+        // Bob sends exactly the global MIN_QUERY_FEE (0.0001) — should revert
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(
+            TaoPunkAgentRegistry.InsufficientFee.selector,
+            0.0001 ether,
+            0.05 ether
+        ));
+        registry.query{value: 0.0001 ether}(1, keccak256("too little"));
+
+        // Bob sends exactly the holder minFee — succeeds
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.05 ether}(1, keccak256("enough"));
+        (, , uint128 fee, , , , ) = registry.queries(qId);
+        assertEq(fee, 0.05 ether);
+    }
+
+    function test_setMinFee_nonOwnerMustPayHolderMinFee() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.setMinFee(1, 0.1 ether);
+
+        // Bob must pay at least 0.1 ether
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(
+            TaoPunkAgentRegistry.InsufficientFee.selector,
+            0.05 ether,
+            0.1 ether
+        ));
+        registry.query{value: 0.05 ether}(1, keccak256("low"));
+
+        // Bob pays enough
+        vm.prank(bob);
+        registry.query{value: 0.1 ether}(1, keccak256("ok"));
+    }
+
+    function test_revert_setMinFee_invalidFee() public {
+        _activatePunk1();
+
+        // Below global MIN_QUERY_FEE but not 0
+        vm.prank(alice);
+        vm.expectRevert(TaoPunkAgentRegistry.InvalidFee.selector);
+        registry.setMinFee(1, 0.00001 ether);
+
+        // Above MAX_QUERY_FEE
+        vm.prank(alice);
+        vm.expectRevert(TaoPunkAgentRegistry.InvalidFee.selector);
+        registry.setMinFee(1, 2 ether);
+    }
+
+    function test_setMinFee_zeroFallsBackToGlobal() public {
+        _activatePunk1();
+
+        // Set a holder minFee, then reset to 0
+        vm.prank(alice);
+        registry.setMinFee(1, 0.5 ether);
+
+        vm.prank(alice);
+        registry.setMinFee(1, 0);
+
+        // Effective min fee should be global MIN_QUERY_FEE
+        assertEq(registry.getEffectiveMinFee(1), 0.0001 ether);
+
+        // Bob can query at global MIN_QUERY_FEE
+        vm.prank(bob);
+        registry.query{value: 0.0001 ether}(1, keccak256("global min"));
+    }
+
+    function test_setMinFee_followsTransfer() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        registry.setMinFee(1, 0.2 ether);
+
+        // Transfer punk to bob
+        punks.transferFrom(alice, bob, 1);
+
+        // minFee persists (it's on the agent, not the owner)
+        assertEq(registry.getEffectiveMinFee(1), 0.2 ether);
+
+        // New owner (bob) can change it
+        vm.prank(bob);
+        registry.setMinFee(1, 0.01 ether);
+        assertEq(registry.getEffectiveMinFee(1), 0.01 ether);
+
+        // Old owner (alice) cannot change it
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.NotPunkOwner.selector, 1));
+        registry.setMinFee(1, 0.5 ether);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  BATCH FULFILL
+    // ═══════════════════════════════════════════════════════════
+
+    function test_batchFulfill_basic() public {
+        _activatePunk1();
+
+        // Submit 3 queries
+        vm.prank(bob);
+        uint256 q0 = registry.query{value: 0.1 ether}(1, keccak256("q0"));
+        vm.prank(bob);
+        uint256 q1 = registry.query{value: 0.2 ether}(1, keccak256("q1"));
+        vm.prank(bob);
+        uint256 q2 = registry.query{value: 0.3 ether}(1, keccak256("q2"));
+
+        // Batch fulfill all 3
+        uint256[] memory ids = new uint256[](3);
+        ids[0] = q0;
+        ids[1] = q1;
+        ids[2] = q2;
+        bytes32[] memory hashes = new bytes32[](3);
+        hashes[0] = keccak256("r0");
+        hashes[1] = keccak256("r1");
+        hashes[2] = keccak256("r2");
+
+        vm.prank(fulfiller);
+        registry.batchFulfill(ids, hashes);
+
+        // All fulfilled
+        (, , , TaoPunkAgentRegistry.QueryStatus s0, , , ) = registry.queries(q0);
+        (, , , TaoPunkAgentRegistry.QueryStatus s1, , , ) = registry.queries(q1);
+        (, , , TaoPunkAgentRegistry.QueryStatus s2, , , ) = registry.queries(q2);
+        assertTrue(s0 == TaoPunkAgentRegistry.QueryStatus.Fulfilled);
+        assertTrue(s1 == TaoPunkAgentRegistry.QueryStatus.Fulfilled);
+        assertTrue(s2 == TaoPunkAgentRegistry.QueryStatus.Fulfilled);
+
+        // Total credited: 0.1 + 0.2 + 0.3 = 0.6
+        assertEq(registry.pendingWithdrawals(alice), 0.6 ether);
+        assertEq(registry.getQueryCount(1), 3);
+    }
+
+    function test_revert_batchFulfill_emptyBatch() public {
+        uint256[] memory ids = new uint256[](0);
+        bytes32[] memory hashes = new bytes32[](0);
+
+        vm.prank(fulfiller);
+        vm.expectRevert(TaoPunkAgentRegistry.InvalidBatchSize.selector);
+        registry.batchFulfill(ids, hashes);
+    }
+
+    function test_revert_batchFulfill_mismatchedLengths() public {
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = 1;
+        ids[1] = 2;
+        bytes32[] memory hashes = new bytes32[](3);
+        hashes[0] = keccak256("r0");
+        hashes[1] = keccak256("r1");
+        hashes[2] = keccak256("r2");
+
+        vm.prank(fulfiller);
+        vm.expectRevert(TaoPunkAgentRegistry.BatchLengthMismatch.selector);
+        registry.batchFulfill(ids, hashes);
+    }
+
+    function test_revert_batchFulfill_oversizedBatch() public {
+        uint256 size = 51; // MAX_BATCH_SIZE + 1
+        uint256[] memory ids = new uint256[](size);
+        bytes32[] memory hashes = new bytes32[](size);
+        for (uint256 i = 0; i < size; i++) {
+            ids[i] = i + 1;
+            hashes[i] = keccak256(abi.encode(i));
+        }
+
+        vm.prank(fulfiller);
+        vm.expectRevert(TaoPunkAgentRegistry.InvalidBatchSize.selector);
+        registry.batchFulfill(ids, hashes);
+    }
+
+    function test_batchFulfill_partialFailure_oneBadId() public {
+        _activatePunk1();
+
+        vm.prank(bob);
+        uint256 q0 = registry.query{value: 0.1 ether}(1, keccak256("q0"));
+
+        // Batch with one valid and one nonexistent query
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = q0;
+        ids[1] = 999; // does not exist
+        bytes32[] memory hashes = new bytes32[](2);
+        hashes[0] = keccak256("r0");
+        hashes[1] = keccak256("r1");
+
+        // Entire batch reverts because _fulfill on ID 999 reverts
+        vm.prank(fulfiller);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.QueryDoesNotExist.selector, 999));
+        registry.batchFulfill(ids, hashes);
+
+        // q0 should still be pending (batch was atomic)
+        (, , , TaoPunkAgentRegistry.QueryStatus status, , , ) = registry.queries(q0);
+        assertTrue(status == TaoPunkAgentRegistry.QueryStatus.Pending);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  RESULT HASH STORED
+    // ═══════════════════════════════════════════════════════════
+
+    function test_resultHash_storedOnFulfill() public {
+        _activatePunk1();
+
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.01 ether}(1, keccak256("input"));
+
+        bytes32 expectedHash = keccak256("the result data");
+
+        vm.prank(fulfiller);
+        registry.fulfill(qId, expectedHash);
+
+        (, , , , , , bytes32 resultHash) = registry.queries(qId);
+        assertEq(resultHash, expectedHash);
+    }
+
+    function test_resultHash_zeroBeforeFulfill() public {
+        _activatePunk1();
+
+        vm.prank(bob);
+        uint256 qId = registry.query{value: 0.01 ether}(1, keccak256("input"));
+
+        (, , , , , , bytes32 resultHash) = registry.queries(qId);
+        assertEq(resultHash, bytes32(0));
+    }
+
+    function test_resultHash_batchFulfillStoresHashes() public {
+        _activatePunk1();
+
+        vm.prank(bob);
+        uint256 q0 = registry.query{value: 0.01 ether}(1, keccak256("q0"));
+        vm.prank(bob);
+        uint256 q1 = registry.query{value: 0.01 ether}(1, keccak256("q1"));
+
+        bytes32 h0 = keccak256("result0");
+        bytes32 h1 = keccak256("result1");
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = q0;
+        ids[1] = q1;
+        bytes32[] memory hashes = new bytes32[](2);
+        hashes[0] = h0;
+        hashes[1] = h1;
+
+        vm.prank(fulfiller);
+        registry.batchFulfill(ids, hashes);
+
+        (, , , , , , bytes32 r0) = registry.queries(q0);
+        (, , , , , , bytes32 r1) = registry.queries(q1);
+        assertEq(r0, h0);
+        assertEq(r1, h1);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -943,20 +1297,30 @@ contract TaoPunkAgentRegistryTest is Test {
         assertEq(alice.balance, aliceBefore);
     }
 
-    /// @dev Query ID 0 works correctly (no default mapping collision)
-    function test_security_queryIdZero() public {
+    /// @dev Query ID starts at 1 (ID 0 = does not exist sentinel)
+    function test_security_queryIdStartsAtOne() public {
         vm.prank(alice);
         registry.activateAgent(1, AGENT_URI);
 
-        // First query should have ID 0
+        // First query should have ID 1, not 0
         vm.prank(bob);
         uint256 qId = registry.query{value: 0.01 ether}(1, keccak256("first"));
-        assertEq(qId, 0);
+        assertEq(qId, 1);
 
-        // Verify it's properly stored
-        (uint256 punkId, address caller, , , , ) = registry.queries(0);
+        // Verify it's properly stored at ID 1
+        (uint256 punkId, address caller, , , , , ) = registry.queries(1);
         assertEq(punkId, 1);
         assertEq(caller, bob);
+
+        // Query ID 0 should be empty (sentinel)
+        (uint256 punkId0, address caller0, , , , , ) = registry.queries(0);
+        assertEq(punkId0, 0);
+        assertEq(caller0, address(0));
+
+        // Second query should have ID 2
+        vm.prank(bob);
+        uint256 qId2 = registry.query{value: 0.01 ether}(1, keccak256("second"));
+        assertEq(qId2, 2);
     }
 
     /// @dev Cannot refund a query that was already refunded
@@ -1110,28 +1474,6 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.fulfill(qId, keccak256("result"));
     }
 
-    /// @dev Treasury change mid-flight has no effect (100% to holder, 0% treasury)
-    function test_security_treasuryChangeMidFlight() public {
-        vm.prank(alice);
-        registry.activateAgent(1, AGENT_URI);
-
-        // Query submitted with treasury = 0xB
-        vm.prank(bob);
-        uint256 qId = registry.query{value: 1 ether}(1, keccak256("test"));
-
-        // Governor changes treasury before fulfillment
-        address newTreasury = address(0x1234);
-        vm.prank(admin);
-        registry.setTreasury(newTreasury);
-
-        // Fulfill — holder gets 100%, treasury irrelevant
-        vm.prank(fulfiller);
-        registry.fulfill(qId, keccak256("result"));
-
-        assertEq(registry.pendingWithdrawals(alice), 1 ether);
-        assertEq(registry.pendingWithdrawals(newTreasury), 0);
-    }
-
     /// @dev Supply can't overflow — activate all possible punks
     function test_security_massActivation() public {
         // Activate 50 punks in a row
@@ -1152,7 +1494,7 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.prank(alice);
         registry.activateAgent(1, AGENT_URI);
 
-        (, uint64 activatedAt, , , ) = registry.getAgent(1);
+        (, , uint64 activatedAt, , , , ) = registry.getAgent(1);
         assertEq(activatedAt, 1_700_000_000);
 
         vm.warp(1_700_001_000);
@@ -1163,7 +1505,7 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.prank(fulfiller);
         registry.fulfill(qId, keccak256("result"));
 
-        (, , , uint64 lastQueryAt, ) = registry.getAgent(1);
+        (, , , , uint64 lastQueryAt, , ) = registry.getAgent(1);
         assertEq(lastQueryAt, 1_700_002_000);
     }
 
@@ -1306,7 +1648,7 @@ contract TaoPunkAgentRegistryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.QueryNotExpired.selector, qId));
         registry.refundExpiredQuery(qId);
 
-        // At exact expiry — IS expired (condition: timestamp < created + expiry → false when equal)
+        // At exact expiry — IS expired (condition: timestamp < created + expiry -> false when equal)
         vm.warp(queryTime + expiryOffset);
         registry.refundExpiredQuery(qId);
     }
@@ -1333,7 +1675,6 @@ contract TaoPunkAgentRegistryTest is Test {
         // 100% credited to holder
         assertEq(registry.pendingWithdrawals(alice), fee);
         // Nobody else gets anything
-        assertEq(registry.pendingWithdrawals(treasury), 0);
         assertEq(registry.pendingWithdrawals(fulfiller), 0);
     }
 
@@ -1451,7 +1792,7 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.fulfill(q1, keccak256("r1"));
         assertEq(registry.pendingWithdrawals(bob), 0.3 ether);
 
-        // balance = 1.0 = alice_pending(0.7) + bob_pending(0.3) ✓
+        // balance = 1.0 = alice_pending(0.7) + bob_pending(0.3)
         assertEq(address(registry).balance, registry.pendingWithdrawals(alice) + registry.pendingWithdrawals(bob));
 
         // Alice claims
@@ -1645,6 +1986,50 @@ contract TaoPunkAgentRegistryTest is Test {
         emit log_named_uint("Gas for claim", gasUsed);
     }
 
+    function test_gas_batchFulfill() public {
+        _activatePunk1();
+
+        uint256[] memory ids = new uint256[](10);
+        bytes32[] memory hashes = new bytes32[](10);
+        for (uint256 i = 0; i < 10; i++) {
+            vm.prank(bob);
+            ids[i] = registry.query{value: 0.01 ether}(1, keccak256(abi.encode(i)));
+            hashes[i] = keccak256(abi.encode("r", i));
+        }
+
+        vm.prank(fulfiller);
+        uint256 gasBefore = gasleft();
+        registry.batchFulfill(ids, hashes);
+        uint256 gasUsed = gasBefore - gasleft();
+        emit log_named_uint("Gas for batchFulfill (10)", gasUsed);
+    }
+
+    function test_gas_pauseResumeAgent() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        registry.pauseAgent(1);
+        uint256 gasUsed = gasBefore - gasleft();
+        emit log_named_uint("Gas for pauseAgent", gasUsed);
+
+        vm.prank(alice);
+        gasBefore = gasleft();
+        registry.resumeAgent(1);
+        gasUsed = gasBefore - gasleft();
+        emit log_named_uint("Gas for resumeAgent", gasUsed);
+    }
+
+    function test_gas_setMinFee() public {
+        _activatePunk1();
+
+        vm.prank(alice);
+        uint256 gasBefore = gasleft();
+        registry.setMinFee(1, 0.05 ether);
+        uint256 gasUsed = gasBefore - gasleft();
+        emit log_named_uint("Gas for setMinFee", gasUsed);
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  END-TO-END SCENARIO
     // ═══════════════════════════════════════════════════════════
@@ -1664,28 +2049,50 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.activateAgent(4, AGENT_URI);
         assertEq(registry.getCollectionSupply(), 2);
 
-        // 4. Bob queries Alice's punk
+        // 4. Alice sets a custom min fee for her agent
+        vm.prank(alice);
+        registry.setMinFee(1, 0.05 ether);
+        assertEq(registry.getEffectiveMinFee(1), 0.05 ether);
+
+        // 5. Bob queries Alice's punk (must pay holder minFee)
         vm.prank(bob);
         uint256 qId1 = registry.query{value: 0.1 ether}(1, keccak256("analyze subnet"));
 
-        // 5. Fulfiller delivers result
+        // 6. Fulfiller delivers result
         vm.prank(fulfiller);
         registry.fulfill(qId1, keccak256("subnet analysis result"));
 
-        // 6. Verify 100% credited to holder
+        // 7. Verify 100% credited to holder, resultHash stored
         assertEq(registry.pendingWithdrawals(alice), 0.1 ether);
         assertEq(registry.getQueryCount(1), 1);
+        (, , , , , , bytes32 rh) = registry.queries(qId1);
+        assertEq(rh, keccak256("subnet analysis result"));
 
-        // 7. Alice claims
+        // 8. Alice claims
         uint256 aliceBal = alice.balance;
         vm.prank(alice);
         registry.claim();
         assertEq(alice.balance, aliceBal + 0.1 ether);
 
-        // 8. Alice sells punk 1 to Bob
+        // 9. Alice pauses her agent
+        vm.prank(alice);
+        registry.pauseAgent(1);
+        assertTrue(registry.isAgentPaused(1));
+
+        // 10. Bob cannot query paused agent
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentIsPaused.selector, 1));
+        registry.query{value: 0.1 ether}(1, keccak256("blocked"));
+
+        // 11. Alice resumes the agent
+        vm.prank(alice);
+        registry.resumeAgent(1);
+        assertFalse(registry.isAgentPaused(1));
+
+        // 12. Alice sells punk 1 to Bob
         punks.transferFrom(alice, bob, 1);
 
-        // 9. New query — revenue goes to Bob (new owner)
+        // 13. New query — revenue goes to Bob (new owner)
         vm.prank(alice);
         uint256 qId2 = registry.query{value: 0.1 ether}(1, keccak256("follow up"));
 
@@ -1693,25 +2100,47 @@ contract TaoPunkAgentRegistryTest is Test {
         registry.fulfill(qId2, keccak256("follow up result"));
         assertEq(registry.pendingWithdrawals(bob), 0.1 ether);
 
-        // 10. Bob claims
+        // 14. Bob claims
         uint256 bobBal = bob.balance;
         vm.prank(bob);
         registry.claim();
         assertEq(bob.balance, bobBal + 0.1 ether);
 
-        // 11. Bob updates the agent URI
+        // 15. Bob updates the agent URI
         vm.prank(bob);
         registry.updateAgentURI(1, AGENT_URI_2);
-        (, , , , string memory uri) = registry.getAgent(1);
+        (, , , , , , string memory uri) = registry.getAgent(1);
         assertEq(uri, AGENT_URI_2);
 
-        // 12. Query count accumulates
+        // 16. Query count accumulates
         assertEq(registry.getQueryCount(1), 2);
 
-        // 13. Verify agent cannot be re-activated
+        // 17. Verify agent cannot be re-activated
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(TaoPunkAgentRegistry.AgentAlreadyActive.selector, 1));
         registry.activateAgent(1, AGENT_URI);
+
+        // 18. Batch fulfill test within lifecycle
+        vm.prank(bob);
+        registry.activateAgent(5, AGENT_URI);
+
+        vm.prank(alice);
+        uint256 q3 = registry.query{value: 0.01 ether}(4, keccak256("batch1"));
+        vm.prank(alice);
+        uint256 q4 = registry.query{value: 0.02 ether}(5, keccak256("batch2"));
+
+        uint256[] memory batchIds = new uint256[](2);
+        batchIds[0] = q3;
+        batchIds[1] = q4;
+        bytes32[] memory batchHashes = new bytes32[](2);
+        batchHashes[0] = keccak256("br1");
+        batchHashes[1] = keccak256("br2");
+
+        vm.prank(fulfiller);
+        registry.batchFulfill(batchIds, batchHashes);
+
+        assertEq(registry.getQueryCount(4), 1);
+        assertEq(registry.getQueryCount(5), 1);
     }
 }
 
